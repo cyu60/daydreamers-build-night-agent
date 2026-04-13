@@ -1,4 +1,4 @@
-import { insert } from '../lib-js/insforge.js';
+import { insertMessage } from '../lib-js/insforge.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -20,14 +20,8 @@ export default async function handler(req, res) {
   const userMessage = input.message || null;
 
   try {
-    // Log the user turn before calling Ara (fire-and-forget)
     if (sessionId && userMessage) {
-      insert('build_night_messages', {
-        session_id: sessionId,
-        turn_id: turnId,
-        role: 'user',
-        text: userMessage,
-      }).catch(() => {});
+      insertMessage({ session_id: sessionId, turn_id: turnId, role: 'user', text: userMessage }).catch(() => {});
     }
 
     const response = await fetch(`${ARA_API}/${APP_ID}/run`, {
@@ -45,15 +39,9 @@ export default async function handler(req, res) {
       return res.status(response.status).json(data);
     }
 
-    // Log the agent reply
     const reply = (data?.result?.output_text) || data?.output_text;
     if (sessionId && reply) {
-      insert('build_night_messages', {
-        session_id: sessionId,
-        turn_id: turnId,
-        role: 'agent',
-        text: reply,
-      }).catch(() => {});
+      insertMessage({ session_id: sessionId, turn_id: turnId, role: 'agent', text: reply }).catch(() => {});
     }
 
     return res.status(200).json(data);

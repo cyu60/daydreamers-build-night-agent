@@ -1,4 +1,4 @@
-import { upsertBySessionId } from '../lib-js/insforge.js';
+import { upsertSession } from '../lib-js/insforge.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -15,17 +15,13 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'invalid email' });
   }
 
-  const result = await upsertBySessionId('build_night_sessions', {
-    session_id,
-    email: emailClean,
-    updated_at: new Date().toISOString(),
-  });
+  const result = await upsertSession({ session_id, email: emailClean });
 
   if (result.skipped) {
     return res.status(200).json({ ok: true, stored: false, reason: 'insforge not configured' });
   }
   if (!result.ok) {
-    return res.status(result.status || 500).json({ error: result.error });
+    return res.status(500).json({ error: result.error });
   }
   return res.status(200).json({ ok: true, stored: true });
 }

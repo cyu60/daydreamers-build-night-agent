@@ -2,5 +2,8 @@
   "name": "daydreamers-build-night-agent",
   "private": true,
   "type": "module",
-  "version": "0.1.0"
+  "version": "0.1.0",
+  "dependencies": {
+    "@insforge/sdk": "^1.2.4"
+  }
 }
