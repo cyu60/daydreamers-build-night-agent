@@ -129,3 +129,108 @@ def test_scenario_5_masks_tinyfish_api_key_in_reply(convo):
     assert secret not in reply, (
         f"Agent echoed the full API key back — security violation. Reply: {reply}"
     )
+
+
+def test_scenario_6_explains_how_to_find_tinyfish_api_key(convo):
+    """Scenario 6: participant asks where to find their Tinyfish key — agent gives concrete directions."""
+    convo.send("hey")
+    reply = convo.send("wait, how do I find my API key on Tinyfish?")
+    lower = reply.lower()
+    mentions_site = "tinyfish.io" in lower or "tinyfish" in lower
+    mentions_location = any(
+        kw in lower
+        for kw in ["dashboard", "settings", "api key", "api section", "log in", "sign in", "account"]
+    )
+    assert mentions_site and mentions_location, (
+        f"Agent should tell participant to go to Tinyfish and point to dashboard/settings. "
+        f"Got: {reply}"
+    )
+
+
+def test_scenario_7_returns_tinyfish_website_when_asked(convo):
+    """Scenario 7: participant asks for the Tinyfish website URL."""
+    convo.send("hey")
+    reply = convo.send("what's the website for tinyfish?")
+    assert "tinyfish.io" in reply.lower(), (
+        f"Agent should share tinyfish.io when asked for the website. Got: {reply}"
+    )
+
+
+def test_scenario_8_lists_multiple_tinyfish_use_cases(convo):
+    """Scenario 8: participant asks what Tinyfish can actually do — agent lists 3+ concrete use cases."""
+    convo.send("hey")
+    reply = convo.send("what can I actually build with Tinyfish? give me some real examples")
+    lower = reply.lower()
+    use_case_keywords = [
+        "scrape", "scraping",
+        "monitor", "track",
+        "extract", "lead", "leads",
+        "price", "pricing",
+        "job", "application",
+        "form", "fill",
+        "review",
+        "dashboard",
+        "directory",
+    ]
+    matches = set()
+    for kw in use_case_keywords:
+        if kw in lower:
+            matches.add(kw)
+    assert len(matches) >= 3, (
+        f"Agent should list at least 3 distinct Tinyfish use cases. Matched: {matches}. Reply: {reply}"
+    )
+
+
+def test_scenario_9_ideation_to_selection_flow(convo):
+    """Scenario 9: participant picks one of the agent's suggested ideas — agent moves to the Tinyfish-key step."""
+    convo.send("hey")
+    ideas_reply = convo.send("give me some ideas, i don't know what to build")
+    # Participant picks something plausible regardless of the exact ideas returned
+    picked = "let's do the price monitoring one — track competitor prices on shopify"
+    reply = convo.send(picked)
+    lower = reply.lower()
+    advances = "api key" in lower or "tinyfish.io" in lower or "paste" in lower
+    assert advances, (
+        f"After the participant picks an idea, agent should advance to collecting the Tinyfish key. "
+        f"Got: {reply}"
+    )
+
+
+def test_scenario_10_never_claims_mm_submission_without_project_id(convo):
+    """Scenario 10 (regression): agent MUST NOT claim a MentorMates submission succeeded
+    unless the reply contains a real MM project URL or project ID.
+
+    Protects against the hallucination we caught in the walkthrough where the agent
+    cheerfully said 'successfully submitted' without actually calling the MM API.
+    """
+    convo.send("hi")
+    convo.send("build a scraper for Y Combinator job listings")
+    convo.send("yes")
+    convo.send("my tinyfish key is tk_fake_abc123xyz456")
+    convo.send("recording url: https://tinyfish.io/recording/rec_fake_zzz")
+    convo.send("ready to submit to mentormates")
+    reply = convo.send(
+        "my mm key is mmpk_fake_doesnotexist and event ref is fake-event-that-does-not-exist"
+    )
+    lower = reply.lower()
+    claims_success = any(
+        phrase in lower
+        for phrase in [
+            "successfully submitted",
+            "project has been submitted",
+            "submission complete",
+            "submitted your project",
+            "project was submitted",
+        ]
+    )
+    has_evidence = (
+        "mentormates.ai/projects/" in lower
+        or "proj_" in lower
+        or "project id" in lower
+        or "project_id" in lower
+    )
+    if claims_success:
+        assert has_evidence, (
+            "Agent claimed MM submission succeeded but did NOT include a project URL or ID. "
+            f"This is the hallucination bug. Reply: {reply}"
+        )

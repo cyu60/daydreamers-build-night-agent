@@ -117,6 +117,26 @@
     object-fit: contain;
   }
 
+  .clear-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 100px;
+    color: var(--muted);
+    font-family: 'DM Mono', monospace;
+    font-size: 0.6rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 0.3rem 0.7rem;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .clear-btn:hover {
+    color: #c83232;
+    border-color: rgba(200,50,50,0.3);
+    background: rgba(200,50,50,0.05);
+  }
+
   .progress {
     padding: 0.65rem 1.5rem;
     background: var(--section-alt);
@@ -360,6 +380,7 @@
       <h1>Build Night <em>Agent</em></h1>
     </div>
     <div class="powered">
+      <button class="clear-btn" id="clearBtn" title="Clear chat history">Clear</button>
       <span class="label">Powered by</span>
       <a href="https://www.mentormates.ai" target="_blank" rel="noopener">
         <img src="/public/mentormates-logo.png" alt="MentorMates">
@@ -539,6 +560,22 @@ inputEl.addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
 });
 sendBtn.addEventListener('click', send);
+
+document.getElementById('clearBtn').addEventListener('click', () => {
+  if (!confirm('Clear chat history and start a new session?')) return;
+  localStorage.removeItem(SESSION_KEY);
+  localStorage.removeItem(SESSION_KEY + ':msgs');
+  conversation = [];
+  sessionId = 'sess_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+  localStorage.setItem(SESSION_KEY, sessionId);
+  // reset progress bar
+  const steps = Array.from(progressEl.querySelectorAll('.step'));
+  steps.forEach((s, i) => {
+    s.classList.remove('active', 'done');
+    if (i === 0) s.classList.add('active');
+  });
+  render();
+});
 
 render();
 inputEl.focus();
