@@ -11,7 +11,13 @@ export default async function handler(req, res) {
   }
 
   const emailClean = String(email).trim().toLowerCase();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailClean)) {
+  // Reject emails with angle brackets, quotes, parens, slashes, backticks,
+  // semicolons, or newlines — all common XSS / header-injection / SQLi vectors.
+  // Also reject anything containing whitespace after trim.
+  if (
+    !/^[^\s@<>"'`();\/\\,]+@[^\s@<>"'`();\/\\,]+\.[^\s@<>"'`();\/\\,]+$/.test(emailClean) ||
+    /[\r\n]/.test(emailClean)
+  ) {
     return res.status(400).json({ error: 'invalid email' });
   }
 

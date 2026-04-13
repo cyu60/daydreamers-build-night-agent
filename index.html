@@ -197,6 +197,41 @@
     border-color: var(--accent-light);
   }
 
+  .suggestions {
+    padding: 0.75rem 1.5rem 0.5rem;
+    background: var(--bg);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .suggestion {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 100px;
+    padding: 0.45rem 0.9rem;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.78rem;
+    color: var(--fg-soft);
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+
+  .suggestion:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-light);
+  }
+
+  .suggestions.hidden { display: none; }
+
+  @media (max-width: 600px) {
+    .suggestions { overflow-x: auto; flex-wrap: nowrap; padding: 0.6rem 1rem 0.4rem; }
+    .suggestion { font-size: 0.72rem; padding: 0.4rem 0.75rem; }
+  }
+
   .messages {
     flex: 1;
     overflow-y: auto;
@@ -503,6 +538,13 @@
     <span class="step" data-step="submit">Submit</span>
   </div>
 
+  <div class="suggestions" id="suggestions">
+    <button class="suggestion" data-prompt="What should I start building today?">What should I build today?</button>
+    <button class="suggestion" data-prompt="How do I find my Tinyfish API key?">Find my Tinyfish API key</button>
+    <button class="suggestion" data-prompt="How do I submit to MentorMates?">How do I submit to MentorMates?</button>
+    <button class="suggestion" data-prompt="Can you show me a Tinyfish demo?">Show me a Tinyfish demo</button>
+  </div>
+
   <div class="messages" id="messages">
     <div class="typing" id="typing">
       <div class="typing-dot"></div>
@@ -630,6 +672,7 @@ async function send() {
   conversation.push({ role: 'user', text, ts: Date.now() });
   persist();
   render();
+  maybeHideSuggestions();
   typing(true);
   try {
     const transcript = conversation
@@ -691,6 +734,24 @@ inputEl.addEventListener('keydown', e => {
 });
 sendBtn.addEventListener('click', send);
 
+// Suggestion chips — one-click prompts
+document.querySelectorAll('.suggestion').forEach(btn => {
+  btn.addEventListener('click', () => {
+    inputEl.value = btn.dataset.prompt || btn.textContent;
+    autoResize();
+    send();
+    document.getElementById('suggestions').classList.add('hidden');
+  });
+});
+
+// Hide suggestions once the conversation has more than the seed greeting
+function maybeHideSuggestions() {
+  const el = document.getElementById('suggestions');
+  if (!el) return;
+  if (conversation.filter(m => m.role === 'user').length > 0) el.classList.add('hidden');
+  else el.classList.remove('hidden');
+}
+
 document.getElementById('clearBtn').addEventListener('click', async () => {
   if (!confirm('Clear chat history (local + server) and start a new session?')) return;
   try {
@@ -716,6 +777,7 @@ document.getElementById('clearBtn').addEventListener('click', async () => {
     if (i === 0) s.classList.add('active');
   });
   render();
+  maybeHideSuggestions();
   showToast(`Chat cleared (session ${oldSid.slice(0, 12)}...)`);
 });
 
@@ -767,6 +829,7 @@ emailInput.addEventListener('keydown', e => {
 if (!userEmail) openEmailModal();
 
 render();
+maybeHideSuggestions();
 inputEl.focus();
 </script>
 </body>

@@ -274,12 +274,15 @@ def test_scenario_11_chat_history_persists_to_insforge():
         )
 
 
-def test_scenario_13_surfaces_mentormates_tutorial_video_on_request(convo):
-    """Scenario 13: participant asks for a walkthrough/tutorial — agent shares the MM participant guide video URL."""
+def test_scenario_13_surfaces_tinyfish_demo_video_when_stuck(convo):
+    """Scenario 13: when participant signals confusion about Tinyfish ('I'm stuck', 'I don't get it',
+    'walk me through'), agent proactively shares the Tinyfish demo video."""
     convo.send("hey")
-    reply = convo.send("can you walk me through how this works? is there a tutorial video?")
-    assert "youtu.be/RMcgFz-R2n4" in reply or "youtube.com/watch?v=RMcgFz-R2n4" in reply, (
-        f"Agent should share the MentorMates participant walkthrough video. Got: {reply}"
+    reply = convo.send("i'm stuck, i don't really get how tinyfish works, can you walk me through it?")
+    expected_host = "nsxcypmjpizdjxrdncpe.supabase.co"
+    expected_path = "build-nights-demo"
+    assert expected_host in reply and expected_path in reply, (
+        f"Agent should share the Tinyfish build-night demo video when participant is stuck. Got: {reply}"
     )
 
 
