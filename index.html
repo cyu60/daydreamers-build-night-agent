@@ -481,13 +481,22 @@ async function send() {
   render();
   typingEl.classList.add('visible');
   try {
+    const transcript = conversation
+      .map(m => `${m.role === 'user' ? 'PARTICIPANT' : 'AGENT'}: ${m.text}`)
+      .join('\n\n');
+    const turnId = 'turn_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
     const res = await fetch(CONFIG.runEndpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         workflow_id: CONFIG.workflow,
-        session_id: sessionId,
-        message: text,
+        input: {
+          session_id: sessionId,
+          run_id: turnId,
+          idempotency_key: turnId,
+          message: text,
+          transcript: transcript,
+        },
       }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
