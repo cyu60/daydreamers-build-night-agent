@@ -20,6 +20,7 @@ ENDPOINT = os.environ.get(
     "BUILD_NIGHT_URL",
     "https://daydreamers-build-night-agent.vercel.app/api/run",
 )
+BASE = ENDPOINT.rsplit("/api/run", 1)[0]
 
 
 class Conversation:
@@ -234,3 +235,68 @@ def test_scenario_10_never_claims_mm_submission_without_project_id(convo):
             "Agent claimed MM submission succeeded but did NOT include a project URL or ID. "
             f"This is the hallucination bug. Reply: {reply}"
         )
+
+
+def test_scenario_11_chat_history_persists_to_insforge():
+    """Scenario 11: every turn (user + agent) is stored to Insforge via /api/history.
+
+    Protects the Insforge backend integration: the chat log table must reflect
+    what the participant sent and what the agent replied, in order, per session.
+    """
+    convo = Conversation()
+    msgs = ["hi", "i want to monitor competitor pricing on shopify"]
+    for m in msgs:
+        convo.send(m)
+
+    resp = requests.get(
+        f"{BASE}/api/history",
+        params={"session_id": convo.session_id},
+        timeout=20,
+    )
+    resp.raise_for_status()
+    rows = resp.json()
+    assert isinstance(rows, list), f"/api/history should return a list. Got: {rows!r}"
+    assert len(rows) == len(msgs) * 2, (
+        f"Expected {len(msgs) * 2} stored messages (user+agent per turn), got {len(rows)}: "
+        f"{[(r.get('role'), r.get('text', '')[:40]) for r in rows]}"
+    )
+
+    # Alternating roles, user messages match what we sent, in order
+    user_rows = [r for r in rows if r["role"] == "user"]
+    agent_rows = [r for r in rows if r["role"] == "agent"]
+    assert len(user_rows) == len(msgs), f"expected {len(msgs)} user rows, got {len(user_rows)}"
+    assert len(agent_rows) == len(msgs), f"expected {len(msgs)} agent rows, got {len(agent_rows)}"
+    for sent, stored in zip(msgs, user_rows):
+        assert stored["text"] == sent, f"user message mismatch: sent={sent!r} stored={stored['text']!r}"
+    for stored in agent_rows:
+        assert stored["text"] and len(stored["text"]) > 5, (
+            f"agent row has empty/too-short text: {stored}"
+        )
+
+
+def test_scenario_12_delete_history_wipes_session_server_side():
+    """Scenario 12: DELETE /api/history?session_id=X removes all rows for that session."""
+    convo = Conversation()
+    convo.send("hello")
+    convo.send("what can i build with tinyfish?")
+
+    before = requests.get(
+        f"{BASE}/api/history",
+        params={"session_id": convo.session_id},
+        timeout=20,
+    ).json()
+    assert len(before) >= 2, f"setup failed — no rows written before DELETE: {before}"
+
+    del_resp = requests.delete(
+        f"{BASE}/api/history",
+        params={"session_id": convo.session_id},
+        timeout=20,
+    )
+    assert del_resp.status_code == 200, f"DELETE failed: {del_resp.status_code} {del_resp.text}"
+
+    after = requests.get(
+        f"{BASE}/api/history",
+        params={"session_id": convo.session_id},
+        timeout=20,
+    ).json()
+    assert after == [], f"expected empty list after DELETE, got {len(after)} rows: {after}"
