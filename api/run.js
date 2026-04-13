@@ -1,3 +1,5 @@
+import { insert } from '../lib-js/insforge.js';
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -11,20 +13,47 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'ARA_APP_ID or ARA_RUNTIME_KEY not configured' });
   }
 
+  const body = req.body || {};
+  const input = body.input || {};
+  const sessionId = input.session_id || null;
+  const turnId = input.run_id || input.idempotency_key || null;
+  const userMessage = input.message || null;
+
   try {
+    // Log the user turn before calling Ara (fire-and-forget)
+    if (sessionId && userMessage) {
+      insert('build_night_messages', {
+        session_id: sessionId,
+        turn_id: turnId,
+        role: 'user',
+        text: userMessage,
+      }).catch(() => {});
+    }
+
     const response = await fetch(`${ARA_API}/${APP_ID}/run`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${RUNTIME_KEY}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(req.body),
+      body: JSON.stringify(body),
     });
 
     const data = await response.json();
 
     if (!response.ok) {
       return res.status(response.status).json(data);
+    }
+
+    // Log the agent reply
+    const reply = (data?.result?.output_text) || data?.output_text;
+    if (sessionId && reply) {
+      insert('build_night_messages', {
+        session_id: sessionId,
+        turn_id: turnId,
+        role: 'agent',
+        text: reply,
+      }).catch(() => {});
     }
 
     return res.status(200).json(data);

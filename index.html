@@ -342,6 +342,85 @@
     font-size: 0.55rem;
   }
 
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(16,17,26,0.55);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 200;
+    backdrop-filter: blur(4px);
+  }
+
+  .modal-overlay.visible { display: flex; }
+
+  .modal {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.75rem 1.75rem 1.5rem;
+    width: min(400px, calc(100% - 2rem));
+    box-shadow: 0 10px 40px rgba(16,17,26,0.2);
+  }
+
+  .modal h3 {
+    font-family: 'DM Serif Display', serif;
+    font-size: 1.25rem;
+    font-weight: 400;
+    margin-bottom: 0.4rem;
+    color: var(--fg);
+  }
+
+  .modal p {
+    font-size: 0.85rem;
+    color: var(--muted);
+    margin-bottom: 1rem;
+    line-height: 1.6;
+  }
+
+  .modal input {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--fg);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.9rem;
+    padding: 0.7rem 0.9rem;
+    outline: none;
+    margin-bottom: 0.75rem;
+    transition: border-color 0.2s;
+  }
+
+  .modal input:focus {
+    border-color: var(--accent);
+  }
+
+  .modal button {
+    background: var(--hero-bg);
+    border: none;
+    border-radius: var(--radius);
+    color: white;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.88rem;
+    font-weight: 600;
+    padding: 0.7rem 1.5rem;
+    cursor: pointer;
+    width: 100%;
+    transition: background 0.2s;
+  }
+
+  .modal button:hover { background: var(--accent); }
+
+  .modal-error {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.7rem;
+    color: #c83232;
+    margin-top: 0.5rem;
+    min-height: 1rem;
+  }
+
   .toast {
     position: fixed;
     bottom: 100px;
@@ -419,6 +498,16 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="emailModal">
+  <div class="modal">
+    <h3>Welcome to build night 👋</h3>
+    <p>Enter your email so we can save your chat and sync your submission.</p>
+    <input type="email" id="emailInput" placeholder="you@example.com" autocomplete="email">
+    <button id="emailSubmit">Continue</button>
+    <div class="modal-error" id="emailError"></div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -432,11 +521,15 @@ const typingEl = document.getElementById('typing');
 const toastEl = document.getElementById('toast');
 const progressEl = document.getElementById('progress');
 
+const EMAIL_KEY = SESSION_KEY + ':email';
+
 let sessionId = localStorage.getItem(SESSION_KEY);
 if (!sessionId) {
   sessionId = 'sess_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
   localStorage.setItem(SESSION_KEY, sessionId);
 }
+
+let userEmail = localStorage.getItem(EMAIL_KEY);
 
 let conversation = JSON.parse(localStorage.getItem(SESSION_KEY + ':msgs') || '[]');
 let sending = false;
@@ -561,21 +654,80 @@ inputEl.addEventListener('keydown', e => {
 });
 sendBtn.addEventListener('click', send);
 
-document.getElementById('clearBtn').addEventListener('click', () => {
-  if (!confirm('Clear chat history and start a new session?')) return;
+document.getElementById('clearBtn').addEventListener('click', async () => {
+  if (!confirm('Clear chat history (local + server) and start a new session?')) return;
+  try {
+    await fetch(`/api/history?session_id=${encodeURIComponent(sessionId)}`, { method: 'DELETE' });
+  } catch (e) { /* non-fatal */ }
+  const oldSid = sessionId;
   localStorage.removeItem(SESSION_KEY);
   localStorage.removeItem(SESSION_KEY + ':msgs');
   conversation = [];
   sessionId = 'sess_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
   localStorage.setItem(SESSION_KEY, sessionId);
-  // reset progress bar
+  // re-link email to new session_id on server
+  if (userEmail) {
+    fetch('/api/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId, email: userEmail }),
+    }).catch(() => {});
+  }
   const steps = Array.from(progressEl.querySelectorAll('.step'));
   steps.forEach((s, i) => {
     s.classList.remove('active', 'done');
     if (i === 0) s.classList.add('active');
   });
   render();
+  showToast(`Chat cleared (session ${oldSid.slice(0, 12)}...)`);
 });
+
+// --- Email modal ---
+const emailModal = document.getElementById('emailModal');
+const emailInput = document.getElementById('emailInput');
+const emailSubmit = document.getElementById('emailSubmit');
+const emailError = document.getElementById('emailError');
+
+function openEmailModal() {
+  emailModal.classList.add('visible');
+  emailError.textContent = '';
+  setTimeout(() => emailInput.focus(), 50);
+}
+
+async function saveEmail(email) {
+  try {
+    const r = await fetch('/api/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId, email }),
+    });
+    if (!r.ok) {
+      const body = await r.json().catch(() => ({}));
+      throw new Error(body.error || `HTTP ${r.status}`);
+    }
+    userEmail = email;
+    localStorage.setItem(EMAIL_KEY, email);
+    emailModal.classList.remove('visible');
+    inputEl.focus();
+  } catch (err) {
+    emailError.textContent = `Could not save: ${err.message}`;
+  }
+}
+
+emailSubmit.addEventListener('click', () => {
+  const v = (emailInput.value || '').trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) {
+    emailError.textContent = 'Please enter a valid email.';
+    return;
+  }
+  saveEmail(v);
+});
+
+emailInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); emailSubmit.click(); }
+});
+
+if (!userEmail) openEmailModal();
 
 render();
 inputEl.focus();
