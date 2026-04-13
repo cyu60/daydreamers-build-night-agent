@@ -274,6 +274,52 @@ def test_scenario_11_chat_history_persists_to_insforge():
         )
 
 
+def test_scenario_13_surfaces_mentormates_tutorial_video_on_request(convo):
+    """Scenario 13: participant asks for a walkthrough/tutorial — agent shares the MM participant guide video URL."""
+    convo.send("hey")
+    reply = convo.send("can you walk me through how this works? is there a tutorial video?")
+    assert "youtu.be/RMcgFz-R2n4" in reply or "youtube.com/watch?v=RMcgFz-R2n4" in reply, (
+        f"Agent should share the MentorMates participant walkthrough video. Got: {reply}"
+    )
+
+
+def test_scenario_14_extracts_event_slug_from_mentormates_url(convo):
+    """Scenario 14: when participant pastes a MentorMates event URL, the agent must extract the slug
+    from the URL and NOT re-ask them for a 'slug' or 'event reference' afterwards.
+
+    Regression for: Chinat pasted https://www.mentormates.ai/events/anthropic-ara-eleven-labs-hackathon/overview
+    and the agent kept asking 'can you provide the slug?' five times.
+    """
+    convo.send("hi")
+    convo.send("scrape a job board for AI roles")
+    convo.send("yes that's the plan")
+    convo.send("my tinyfish key is tk_demo_xxx")
+    convo.send("recording url: https://tinyfish.io/recording/rec_demo")
+    convo.send("ready to submit")
+    convo.send("mm_sk_fakekey_abc123")
+    reply = convo.send(
+        "https://www.mentormates.ai/events/anthropic-ara-eleven-labs-hackathon/overview"
+    )
+    lower = reply.lower()
+    asks_for_slug_again = any(
+        phrase in lower
+        for phrase in [
+            "provide the slug",
+            "give me the slug",
+            "need the slug",
+            "need the event reference",
+            "what's the slug",
+            "what is the slug",
+            "shorter identifier",
+            "can you share the slug",
+        ]
+    )
+    assert not asks_for_slug_again, (
+        f"Agent should auto-extract 'anthropic-ara-eleven-labs-hackathon' from the URL, "
+        f"not ask for a slug again. Reply: {reply}"
+    )
+
+
 def test_scenario_12_delete_history_wipes_session_server_side():
     """Scenario 12: DELETE /api/history?session_id=X removes all rows for that session."""
     convo = Conversation()
