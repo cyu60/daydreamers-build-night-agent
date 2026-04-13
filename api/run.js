@@ -21,7 +21,7 @@ export default async function handler(req, res) {
 
   try {
     if (sessionId && userMessage) {
-      insertMessage({ session_id: sessionId, turn_id: turnId, role: 'user', text: userMessage }).catch(() => {});
+      await insertMessage({ session_id: sessionId, turn_id: turnId, role: 'user', text: userMessage });
     }
 
     const response = await fetch(`${ARA_API}/${APP_ID}/run`, {
@@ -41,7 +41,7 @@ export default async function handler(req, res) {
 
     const reply = (data?.result?.output_text) || data?.output_text;
     if (sessionId && reply) {
-      insertMessage({ session_id: sessionId, turn_id: turnId, role: 'agent', text: reply }).catch(() => {});
+      await insertMessage({ session_id: sessionId, turn_id: turnId, role: 'agent', text: reply });
     }
 
     return res.status(200).json(data);
