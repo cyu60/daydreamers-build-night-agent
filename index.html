@@ -635,6 +635,8 @@ let userEmail = localStorage.getItem(EMAIL_KEY);
 let tinyfishKey = sessionStorage.getItem(TF_KEY) || null;
 
 let mmKey = sessionStorage.getItem(MM_KEY) || null;
+let tinyfishUrl = sessionStorage.getItem(TF_URL) || null;
+let tinyfishGoal = sessionStorage.getItem(TF_GOAL) || null;
 
 // Lightweight capture of a Tinyfish or MentorMates key the moment the
 // participant pastes one (so it's available for any <<TINYFISH_RUN>> or
@@ -655,6 +657,41 @@ function captureTinyfishKeyFrom(text) {
     mmKey = mm[0];
     sessionStorage.setItem(MM_KEY, mmKey);
   }
+  // After the Tinyfish key has been captured, extract a target URL and
+  // freeform goal text from subsequent participant messages. This is the
+  // fallback path for when the LLM forgets to emit <<TINYFISH_RUN>>.
+  if (tinyfishKey) {
+    const urlMatch = text.match(/\bhttps?:\/\/[^\s<>"']+/);
+    if (urlMatch && !tinyfishUrl) {
+      const url = urlMatch[0];
+      if (!/tinyfish\.(io|ai)|mentormates\.ai/.test(url)) {
+        tinyfishUrl = url;
+        sessionStorage.setItem(TF_URL, tinyfishUrl);
+      }
+    }
+    if (tinyfishUrl && !tinyfishGoal) {
+      const goalText = text.replace(/\bhttps?:\/\/\S+/g, '').replace(/[\s—–-]+/g, ' ').trim();
+      if (goalText.length >= 3) {
+        tinyfishGoal = goalText.slice(0, 300);
+        sessionStorage.setItem(TF_GOAL, tinyfishGoal);
+      }
+    }
+  }
+}
+
+const RUN_PROMISE_PATTERNS = [
+  /let['’]?s run/i,
+  /running the tinyfish/i,
+  /running the automation/i,
+  /i'?ll run it/i,
+  /setting (it )?up/i,
+  /kicking (it )?off/i,
+  /ready to run/i,
+  /ready to execute/i,
+];
+
+function agentPromisedRun(reply) {
+  return RUN_PROMISE_PATTERNS.some(re => re.test(reply));
 }
 
 let conversation = JSON.parse(localStorage.getItem(SESSION_KEY + ':msgs') || '[]');
