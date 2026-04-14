@@ -661,16 +661,24 @@ function captureTinyfishKeyFrom(text) {
   // freeform goal text from subsequent participant messages. This is the
   // fallback path for when the LLM forgets to emit <<TINYFISH_RUN>>.
   if (tinyfishKey) {
-    const urlMatch = text.match(/\bhttps?:\/\/[^\s<>"']+/);
-    if (urlMatch && !tinyfishUrl) {
-      const url = urlMatch[0];
-      if (!/tinyfish\.(io|ai)|mentormates\.ai/.test(url)) {
-        tinyfishUrl = url;
-        sessionStorage.setItem(TF_URL, tinyfishUrl);
-      }
+    // Capture full URLs first, then fall back to bare domains like `devpost.com`.
+    let urlMatch = text.match(/\bhttps?:\/\/[^\s<>"']+/);
+    let rawUrl = urlMatch ? urlMatch[0] : null;
+    if (!rawUrl) {
+      const bare = text.match(/\b(?:[a-z0-9-]+\.)+(?:com|io|ai|org|net|co|app|dev|xyz|info|edu)\b(?:\/[^\s<>"']*)?/i);
+      if (bare) rawUrl = 'https://' + bare[0];
+    }
+    if (rawUrl && !tinyfishUrl && !/tinyfish\.(io|ai)|mentormates\.ai/.test(rawUrl)) {
+      tinyfishUrl = rawUrl;
+      sessionStorage.setItem(TF_URL, tinyfishUrl);
     }
     if (tinyfishUrl && !tinyfishGoal) {
-      const goalText = text.replace(/\bhttps?:\/\/\S+/g, '').replace(/[\s—–-]+/g, ' ').trim();
+      // Strip URLs + bare domains + the key itself to get the freeform goal.
+      const goalText = text
+        .replace(/\bhttps?:\/\/\S+/g, '')
+        .replace(/\b(?:[a-z0-9-]+\.)+(?:com|io|ai|org|net|co|app|dev|xyz|info|edu)\b(?:\/[^\s<>"']*)?/gi, '')
+        .replace(/\bsk-tinyfish-\S+|\btk_\S+|\btinyfish_\S+|\bmm_sk_\S+/gi, '')
+        .replace(/[\s—–-]+/g, ' ').trim();
       if (goalText.length >= 3) {
         tinyfishGoal = goalText.slice(0, 300);
         sessionStorage.setItem(TF_GOAL, tinyfishGoal);
@@ -681,13 +689,20 @@ function captureTinyfishKeyFrom(text) {
 
 const RUN_PROMISE_PATTERNS = [
   /let['’]?s run/i,
+  /let['’]?s scrape/i,
+  /let['’]?s extract/i,
+  /let['’]?s go/i,
   /running the tinyfish/i,
   /running the automation/i,
   /i'?ll run it/i,
-  /setting (it )?up/i,
-  /kicking (it )?off/i,
+  /i'?ll scrape/i,
+  /i'?ll get that for you/i,
+  /i'?ll set (it|that) up/i,
+  /setting (it|that )?up/i,
+  /kicking (it|that)? ?off/i,
   /ready to run/i,
   /ready to execute/i,
+  /starting the (run|scrape|automation)/i,
 ];
 
 function agentPromisedRun(reply) {

@@ -18,10 +18,24 @@ export default async function handler(req, res) {
   const sessionId = input.session_id || null;
   const turnId = input.run_id || input.idempotency_key || null;
   const userMessage = input.message || null;
+  const transcript = input.transcript || '';
 
   try {
     if (sessionId && userMessage) {
       await insertMessage({ session_id: sessionId, turn_id: turnId, role: 'user', text: userMessage });
+    }
+
+    // Ara only exposes `message` to the subagent LLM. Inline the prior transcript
+    // so the LLM actually sees what's been said. Without this the agent is
+    // effectively stateless each turn.
+    if (transcript && transcript.trim().length > 0) {
+      body.input = {
+        ...input,
+        message:
+          `PRIOR CONVERSATION (oldest → newest):\n${transcript}\n\n` +
+          `────────────────────────────────────\n` +
+          `LATEST PARTICIPANT MESSAGE (reply to this, informed by the full prior context above):\n${userMessage}`,
+      };
     }
 
     const response = await fetch(`${ARA_API}/${APP_ID}/run`, {
