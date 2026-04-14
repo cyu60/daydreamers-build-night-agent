@@ -286,6 +286,120 @@ def test_scenario_13_surfaces_tinyfish_demo_video_when_stuck(convo):
     )
 
 
+def test_scenario_16_accepts_sk_tinyfish_prefix(convo):
+    """Scenario 16 (regression from live case study 2026-04-13 18:53): real Tinyfish keys
+    are `sk-tinyfish-<chars>`, NOT `tk_`. Agent must acknowledge them and mask by
+    last few chars, never falsifying a `tk_` prefix."""
+    convo.send("hi")
+    convo.send("scrape a webpage for me")
+    convo.send("yes")
+    secret = "sk-tinyfish-_uoPRPk_AJzxUlJsvkScgBXKcqcxST-z"
+    reply = convo.send(secret)
+    assert secret not in reply, f"Agent echoed full key: {reply}"
+    lower = reply.lower()
+    assert "tk_" not in reply, f"Agent falsified tk_ prefix on an sk-tinyfish- key: {reply}"
+    assert any(tok in lower for tok in ["got it", "thanks", "received", "key ending", "...qcxst-z"]), (
+        f"Agent should acknowledge the sk-tinyfish- key was received. Got: {reply}"
+    )
+
+
+def test_scenario_17_parses_url_and_goal_from_single_message(convo):
+    """Scenario 17 (regression from case study): participant provides URL AND goal in
+    one message — agent should not re-ask for either."""
+    convo.send("hi")
+    convo.send("i want to understand a website")
+    convo.send("yes")
+    convo.send("sk-tinyfish-abcdefghij_1234567890ABCDEFGHIJ")
+    reply = convo.send(
+        "https://daydreamers-build-night-agent.vercel.app — give me an overview of what this site does"
+    )
+    lower = reply.lower()
+    asks_for_goal_again = any(
+        p in lower for p in ["please provide a goal", "please provide a one-sentence goal", "what would you like to extract"]
+    )
+    assert not asks_for_goal_again, (
+        f"Agent re-asked for the goal even though it was provided in the same message. Reply: {reply}"
+    )
+
+
+def test_scenario_18_extracts_key_from_pasted_doc_blob(convo):
+    """Scenario 18 (regression): participant pastes a shell export line or docs blob
+    containing the MM key — agent extracts it, doesn't re-ask."""
+    convo.send("hi")
+    convo.send("scrape a website for product info")
+    convo.send("yes")
+    convo.send("sk-tinyfish-my_real_tinyfish_key_abc123xyz456")
+    convo.send("https://example.com — list product names and prices")
+    # Simulate the Tinyfish run outcome that frontend would normally inject
+    convo.send("TINYFISH_RESULT: {\"products\":[{\"name\":\"Widget\",\"price\":\"$9.99\"}]}")
+    convo.send("ready to submit")
+    blob = (
+        "# MentorMates Developer API\n\n"
+        "### Set env vars\n"
+        "export MENTORMATES_PARTICIPANT_API_KEY=\"mm_sk_ABCDEF1234567890abcdef1234567890CASE_STUDY_KEY_ffffffff\"\n\n"
+        "### 3. Install the skill\n"
+        "/plugin marketplace add edumame/mentormates-marketplace"
+    )
+    reply = convo.send(blob)
+    lower = reply.lower()
+    reasks_key = any(
+        p in lower for p in [
+            "please paste your mentor mates participant api key",
+            "please provide your mentor mates participant api key",
+            "can you provide your mentor mates participant api key",
+            "share your mentor mates participant api key",
+        ]
+    )
+    assert not reasks_key, (
+        "Agent should extract the mm_sk_ key from the pasted blob, not re-ask. "
+        f"Reply: {reply}"
+    )
+
+
+def test_scenario_19_no_tinyfish_failure_claim_without_error_in_transcript(convo):
+    """Scenario 19 (regression from case study): agent said 'there was an issue with
+    the Tinyfish run' but no TINYFISH_ERROR was ever in the transcript. Ban that."""
+    convo.send("hi")
+    convo.send("scrape a site")
+    convo.send("yes")
+    convo.send("sk-tinyfish-examplekey_abcdef1234567890xyz")
+    convo.send("https://example.com — list all links on the page")
+    reply = convo.send("ok")
+    lower = reply.lower()
+    claims_issue = any(
+        p in lower for p in [
+            "there was an issue with the tinyfish",
+            "tinyfish run failed",
+            "the run errored",
+            "tinyfish ran into",
+            "the automation failed",
+        ]
+    )
+    assert not claims_issue, (
+        "Agent claimed a Tinyfish failure without any TINYFISH_ERROR in the transcript — "
+        f"hallucination. Reply: {reply}"
+    )
+
+
+def test_scenario_20_marker_accompanies_run_promise(convo):
+    """Scenario 20: if agent says it will run Tinyfish, the reply MUST contain the
+    <<TINYFISH_RUN ...>> marker. Prevents 'I'll run it!' + no marker = no run."""
+    convo.send("hi")
+    convo.send("scrape a website for headline text")
+    convo.send("yes")
+    convo.send("sk-tinyfish-my-key-abcdef1234567890xyz")
+    convo.send("https://example.com — extract all h1 headings")
+    reply = convo.send("go")
+    lower = reply.lower()
+    promises_run = any(p in lower for p in ["let's run", "i'll run", "running now", "kicking off", "setting up"])
+    has_marker = "<<TINYFISH_RUN" in reply
+    if promises_run:
+        assert has_marker, (
+            "Agent promised to run Tinyfish but did NOT emit the <<TINYFISH_RUN ...>> marker "
+            f"in the same reply. Frontend can't execute. Reply: {reply}"
+        )
+
+
 def test_scenario_15_emits_tinyfish_run_marker_when_inputs_collected(convo):
     """Scenario 15: once the agent has Tinyfish API key + target URL + goal, it emits
     the <<TINYFISH_RUN url="..." goal="...">> marker that the frontend intercepts

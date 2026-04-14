@@ -638,12 +638,16 @@ let mmKey = sessionStorage.getItem(MM_KEY) || null;
 // <<MM_SUBMIT>> marker the agent emits later). Stored in sessionStorage only —
 // cleared when the tab closes. Never persisted to our server in plaintext.
 function captureTinyfishKeyFrom(text) {
-  const tf = text.match(/\btk_[A-Za-z0-9_-]{10,}\b/);
+  // Tinyfish keys in the wild: `sk-tinyfish-<20+ chars>`, `tk_<20+ chars>`,
+  // or `tinyfish_<20+ chars>`. Scan the whole blob — users paste shell exports,
+  // docs, .env lines.
+  const tf = text.match(/\bsk-tinyfish-[A-Za-z0-9_-]{8,}|\btk_[A-Za-z0-9_-]{10,}|\btinyfish_[A-Za-z0-9_-]{10,}/i);
   if (tf && !tinyfishKey) {
     tinyfishKey = tf[0];
     sessionStorage.setItem(TF_KEY, tinyfishKey);
   }
-  const mm = text.match(/\bmm_sk_[A-Za-z0-9_-]{10,}\b/);
+  // MentorMates participant keys: mm_sk_<hex>. Same blob-scan policy.
+  const mm = text.match(/\bmm_sk_[A-Za-z0-9_-]{10,}/);
   if (mm && !mmKey) {
     mmKey = mm[0];
     sessionStorage.setItem(MM_KEY, mmKey);
