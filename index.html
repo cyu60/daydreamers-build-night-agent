@@ -307,6 +307,16 @@
     font-size: 0.82em;
   }
 
+  .msg-video {
+    display: block;
+    width: 100%;
+    max-width: 440px;
+    margin: 0.65rem 0 0.25rem;
+    border-radius: 12px;
+    background: #000;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+  }
+
   .typing {
     display: none;
     align-self: flex-start;
@@ -679,16 +689,33 @@ function updateProgress(stepId) {
   });
 }
 
+function isPlayableVideoUrl(url) {
+  return /\.(mp4|webm|mov)(\?|$)/i.test(url);
+}
+
+function videoEmbed(url) {
+  return `<video controls playsinline preload="metadata" class="msg-video">`
+    + `<source src="${url}">`
+    + `Your browser can't play this video. <a href="${url}" target="_blank" rel="noopener">Open it here</a>.`
+    + `</video>`;
+}
+
 function formatText(text) {
+  // 0. Strip internal tool-call markers so they never render to the participant.
+  text = text.replace(/<<TINYFISH_RUN\s+[^>]*>>/g, '').trim();
+
   // 1. HTML-escape everything so agent-emitted content can't inject markup.
   let s = text
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-  // 2. Markdown links [label](url) → <a>. Record placeholders so the bare-URL
-  //    pass below doesn't re-match the URL inside the href we just wrote.
+  // 2. Markdown links [label](url) → <a> OR <video> when the URL is a
+  //    playable video file. Record placeholders so the bare-URL pass below
+  //    doesn't re-match the URL inside the href we just wrote.
   const slots = [];
   s = s.replace(/\[([^\]]+?)\]\((https?:[^)\s]+)\)/g, (_, label, url) => {
-    const i = slots.push(`<a href="${url}" target="_blank" rel="noopener">${label}</a>`) - 1;
+    const html = isPlayableVideoUrl(url) ? videoEmbed(url)
+      : `<a href="${url}" target="_blank" rel="noopener">${label}</a>`;
+    const i = slots.push(html) - 1;
     return `\u0000SLOT${i}\u0000`;
   });
 
@@ -696,10 +723,14 @@ function formatText(text) {
   //    can never appear inside an attribute).
   s = s.replace(
     /(^|[\s(])(https?:\/\/[^\s<)"']+)/g,
-    (_, lead, url) => `${lead}<a href="${url}" target="_blank" rel="noopener">${url}</a>`,
+    (_, lead, url) => {
+      const html = isPlayableVideoUrl(url) ? videoEmbed(url)
+        : `<a href="${url}" target="_blank" rel="noopener">${url}</a>`;
+      return `${lead}${html}`;
+    },
   );
 
-  // 4. Inline formatting + restore link slots.
+  // 4. Inline formatting + restore link/video slots.
   s = s
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/`(.+?)`/g, '<code>$1</code>')
