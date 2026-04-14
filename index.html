@@ -621,6 +621,9 @@ const progressEl = document.getElementById('progress');
 const EMAIL_KEY = SESSION_KEY + ':email';
 const TF_KEY = SESSION_KEY + ':tfkey';
 const MM_KEY = SESSION_KEY + ':mmkey';
+const TF_URL = SESSION_KEY + ':tfurl';
+const TF_GOAL = SESSION_KEY + ':tfgoal';
+const TF_RAN = SESSION_KEY + ':tfran';
 
 let sessionId = localStorage.getItem(SESSION_KEY);
 if (!sessionId) {
@@ -796,11 +799,20 @@ async function send() {
     persist();
     if (step) updateProgress(step);
 
-    // Intercept <<TINYFISH_RUN url="..." goal="...">> marker and actually execute.
+    // Path A: Intercept <<TINYFISH_RUN url="..." goal="...">> marker.
     const tfMarker = reply.match(/<<TINYFISH_RUN\s+url="([^"]+)"\s+goal="([^"]+)"\s*>>/);
-    if (tfMarker && tinyfishKey) {
+    const alreadyRan = sessionStorage.getItem(TF_RAN) === '1';
+    if (tfMarker && tinyfishKey && !alreadyRan) {
       const [, tfUrl, tfGoal] = tfMarker;
+      sessionStorage.setItem(TF_RAN, '1');
       await runTinyfishAndContinue(tfUrl, tfGoal);
+    } else if (
+      !alreadyRan && tinyfishKey && tinyfishUrl && tinyfishGoal && agentPromisedRun(reply)
+    ) {
+      // Path B (fallback): agent said it would run but didn't emit a marker.
+      // Trigger based on captured state.
+      sessionStorage.setItem(TF_RAN, '1');
+      await runTinyfishAndContinue(tinyfishUrl, tinyfishGoal);
     }
 
     // Intercept <<MM_SUBMIT event_ref="..." name="..." description="..." ...>> marker.
@@ -1014,6 +1026,15 @@ document.getElementById('clearBtn').addEventListener('click', async () => {
   const oldSid = sessionId;
   localStorage.removeItem(SESSION_KEY);
   localStorage.removeItem(SESSION_KEY + ':msgs');
+  sessionStorage.removeItem(TF_KEY);
+  sessionStorage.removeItem(TF_URL);
+  sessionStorage.removeItem(TF_GOAL);
+  sessionStorage.removeItem(TF_RAN);
+  sessionStorage.removeItem(MM_KEY);
+  tinyfishKey = null;
+  tinyfishUrl = null;
+  tinyfishGoal = null;
+  mmKey = null;
   conversation = [];
   sessionId = 'sess_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
   localStorage.setItem(SESSION_KEY, sessionId);
