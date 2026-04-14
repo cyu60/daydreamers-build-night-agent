@@ -609,6 +609,7 @@ const toastEl = document.getElementById('toast');
 const progressEl = document.getElementById('progress');
 
 const EMAIL_KEY = SESSION_KEY + ':email';
+const TF_KEY = SESSION_KEY + ':tfkey';
 
 let sessionId = localStorage.getItem(SESSION_KEY);
 if (!sessionId) {
@@ -617,6 +618,18 @@ if (!sessionId) {
 }
 
 let userEmail = localStorage.getItem(EMAIL_KEY);
+let tinyfishKey = sessionStorage.getItem(TF_KEY) || null;
+
+// Lightweight capture of a Tinyfish key the moment the participant pastes one
+// (so it's available for any <<TINYFISH_RUN>> marker the agent emits later).
+// Stored in sessionStorage only — cleared when the tab closes.
+function captureTinyfishKeyFrom(text) {
+  const m = text.match(/\btk_[A-Za-z0-9_-]{10,}\b/);
+  if (m && !tinyfishKey) {
+    tinyfishKey = m[0];
+    sessionStorage.setItem(TF_KEY, tinyfishKey);
+  }
+}
 
 let conversation = JSON.parse(localStorage.getItem(SESSION_KEY + ':msgs') || '[]');
 let sending = false;
@@ -703,6 +716,7 @@ async function send() {
   sendBtn.disabled = true;
   inputEl.value = '';
   autoResize();
+  captureTinyfishKeyFrom(text);
   conversation.push({ role: 'user', text, ts: Date.now() });
   persist();
   render();
@@ -734,6 +748,13 @@ async function send() {
     conversation.push({ role: 'assistant', text: reply, ts: Date.now() });
     persist();
     if (step) updateProgress(step);
+
+    // Intercept <<TINYFISH_RUN url="..." goal="...">> marker and actually execute.
+    const marker = reply.match(/<<TINYFISH_RUN\s+url="([^"]+)"\s+goal="([^"]+)"\s*>>/);
+    if (marker && tinyfishKey) {
+      const [, tfUrl, tfGoal] = marker;
+      await runTinyfishAndContinue(tfUrl, tfGoal);
+    }
   } catch (err) {
     conversation.push({
       role: 'assistant',
@@ -748,6 +769,77 @@ async function send() {
     sendBtn.disabled = false;
     render();
     inputEl.focus();
+  }
+}
+
+async function runTinyfishAndContinue(url, goal) {
+  // Show a status bubble while the browser agent works
+  conversation.push({
+    role: 'assistant',
+    text: `_running Tinyfish on ${url} — this usually takes 30-90 seconds..._`,
+    ts: Date.now(),
+  });
+  persist();
+  render();
+  typing(true);
+
+  let outcome;
+  try {
+    const r = await fetch('/api/tinyfish', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ api_key: tinyfishKey, url, goal }),
+    });
+    const data = await r.json();
+    if (!r.ok) {
+      outcome = `TINYFISH_ERROR: ${data.error || r.status}${data.detail ? ' — ' + data.detail : ''}`;
+    } else {
+      outcome = `TINYFISH_RESULT: ${JSON.stringify(data.result).slice(0, 3000)}`;
+      if (data.streaming_url) outcome += `\n(streaming URL: ${data.streaming_url})`;
+    }
+  } catch (err) {
+    outcome = `TINYFISH_ERROR: ${err.message}`;
+  } finally {
+    typing(false);
+  }
+
+  // Feed result back to the agent as a participant-side message so it can summarize
+  conversation.push({ role: 'user', text: outcome, ts: Date.now() });
+  persist();
+  render();
+
+  // Re-send to get the agent's follow-up summary
+  try {
+    const transcript = conversation
+      .map(m => `${m.role === 'user' ? 'PARTICIPANT' : 'AGENT'}: ${m.text}`)
+      .join('\n\n');
+    const turnId = 'turn_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    typing(true);
+    const res = await fetch(CONFIG.runEndpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        workflow_id: CONFIG.workflow,
+        input: {
+          session_id: sessionId,
+          run_id: turnId,
+          idempotency_key: turnId,
+          message: outcome,
+          transcript,
+        },
+      }),
+    });
+    const data = await res.json();
+    const reply = data?.result?.output_text || data?.output_text || '';
+    if (reply) {
+      conversation.push({ role: 'assistant', text: reply, ts: Date.now() });
+      persist();
+    }
+  } catch (err) {
+    showToast(`Follow-up failed: ${err.message}`);
+  } finally {
+    typing(false);
+    render();
   }
 }
 

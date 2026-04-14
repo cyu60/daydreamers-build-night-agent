@@ -286,6 +286,22 @@ def test_scenario_13_surfaces_tinyfish_demo_video_when_stuck(convo):
     )
 
 
+def test_scenario_15_emits_tinyfish_run_marker_when_inputs_collected(convo):
+    """Scenario 15: once the agent has Tinyfish API key + target URL + goal, it emits
+    the <<TINYFISH_RUN url="..." goal="...">> marker that the frontend intercepts
+    to actually invoke the Tinyfish API."""
+    convo.send("hi")
+    convo.send("scrape product names and prices from an ecommerce page")
+    convo.send("yes that's the plan")
+    convo.send("my tinyfish key is tk_demo_test_9f8e7d6c5b4a3f2e")
+    convo.send("target url: https://example.com/products, goal: extract all product names and prices as json")
+    # Agent should emit the marker now that it has key + url + goal
+    reply = convo.send("go")
+    assert "<<TINYFISH_RUN" in reply and "url=" in reply and "goal=" in reply, (
+        f"Agent should emit <<TINYFISH_RUN url=\"...\" goal=\"...\">> marker once key+url+goal are collected. Got: {reply}"
+    )
+
+
 def test_scenario_14_extracts_event_slug_from_mentormates_url(convo):
     """Scenario 14: when participant pastes a MentorMates event URL, the agent must extract the slug
     from the URL and NOT re-ask them for a 'slug' or 'event reference' afterwards.
