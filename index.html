@@ -620,6 +620,7 @@ const progressEl = document.getElementById('progress');
 
 const EMAIL_KEY = SESSION_KEY + ':email';
 const TF_KEY = SESSION_KEY + ':tfkey';
+const MM_KEY = SESSION_KEY + ':mmkey';
 
 let sessionId = localStorage.getItem(SESSION_KEY);
 if (!sessionId) {
@@ -630,14 +631,22 @@ if (!sessionId) {
 let userEmail = localStorage.getItem(EMAIL_KEY);
 let tinyfishKey = sessionStorage.getItem(TF_KEY) || null;
 
-// Lightweight capture of a Tinyfish key the moment the participant pastes one
-// (so it's available for any <<TINYFISH_RUN>> marker the agent emits later).
-// Stored in sessionStorage only — cleared when the tab closes.
+let mmKey = sessionStorage.getItem(MM_KEY) || null;
+
+// Lightweight capture of a Tinyfish or MentorMates key the moment the
+// participant pastes one (so it's available for any <<TINYFISH_RUN>> or
+// <<MM_SUBMIT>> marker the agent emits later). Stored in sessionStorage only —
+// cleared when the tab closes. Never persisted to our server in plaintext.
 function captureTinyfishKeyFrom(text) {
-  const m = text.match(/\btk_[A-Za-z0-9_-]{10,}\b/);
-  if (m && !tinyfishKey) {
-    tinyfishKey = m[0];
+  const tf = text.match(/\btk_[A-Za-z0-9_-]{10,}\b/);
+  if (tf && !tinyfishKey) {
+    tinyfishKey = tf[0];
     sessionStorage.setItem(TF_KEY, tinyfishKey);
+  }
+  const mm = text.match(/\bmm_sk_[A-Za-z0-9_-]{10,}\b/);
+  if (mm && !mmKey) {
+    mmKey = mm[0];
+    sessionStorage.setItem(MM_KEY, mmKey);
   }
 }
 
@@ -702,7 +711,10 @@ function videoEmbed(url) {
 
 function formatText(text) {
   // 0. Strip internal tool-call markers so they never render to the participant.
-  text = text.replace(/<<TINYFISH_RUN\s+[^>]*>>/g, '').trim();
+  text = text
+    .replace(/<<TINYFISH_RUN\s+[^>]*>>/g, '')
+    .replace(/<<MM_SUBMIT\s+[^>]*>>/g, '')
+    .trim();
 
   // 1. HTML-escape everything so agent-emitted content can't inject markup.
   let s = text
@@ -781,10 +793,18 @@ async function send() {
     if (step) updateProgress(step);
 
     // Intercept <<TINYFISH_RUN url="..." goal="...">> marker and actually execute.
-    const marker = reply.match(/<<TINYFISH_RUN\s+url="([^"]+)"\s+goal="([^"]+)"\s*>>/);
-    if (marker && tinyfishKey) {
-      const [, tfUrl, tfGoal] = marker;
+    const tfMarker = reply.match(/<<TINYFISH_RUN\s+url="([^"]+)"\s+goal="([^"]+)"\s*>>/);
+    if (tfMarker && tinyfishKey) {
+      const [, tfUrl, tfGoal] = tfMarker;
       await runTinyfishAndContinue(tfUrl, tfGoal);
+    }
+
+    // Intercept <<MM_SUBMIT event_ref="..." name="..." description="..." ...>> marker.
+    const mmMarker = reply.match(/<<MM_SUBMIT\s+([^>]+)>>/);
+    if (mmMarker && mmKey) {
+      const attrs = {};
+      for (const m of mmMarker[1].matchAll(/(\w+)="([^"]*)"/g)) attrs[m[1]] = m[2];
+      await submitToMentorMatesAndContinue(attrs);
     }
   } catch (err) {
     conversation.push({
@@ -800,6 +820,79 @@ async function send() {
     sendBtn.disabled = false;
     render();
     inputEl.focus();
+  }
+}
+
+async function submitToMentorMatesAndContinue(attrs) {
+  const payload = {
+    api_key: mmKey,
+    event_ref: attrs.event_ref,
+    project_name: attrs.name,
+    project_description: attrs.description,
+    project_url: attrs.project_url || undefined,
+    video_url: attrs.video_url || undefined,
+    lead_email: userEmail || undefined,
+  };
+  conversation.push({
+    role: 'assistant',
+    text: `_submitting to MentorMates (${attrs.event_ref})..._`,
+    ts: Date.now(),
+  });
+  persist();
+  render();
+  typing(true);
+  let outcome;
+  try {
+    const r = await fetch('/api/mm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await r.json();
+    if (!r.ok) {
+      outcome = `MM_ERROR: ${data.error || r.status}${data.detail ? ' — ' + JSON.stringify(data.detail).slice(0, 300) : ''}`;
+    } else {
+      outcome = `MM_RESULT: ${JSON.stringify({ project_id: data.project_id, mm_project_url: data.mm_project_url, joined: data.joined })}`;
+    }
+  } catch (err) {
+    outcome = `MM_ERROR: ${err.message}`;
+  } finally {
+    typing(false);
+  }
+  conversation.push({ role: 'user', text: outcome, ts: Date.now() });
+  persist();
+  render();
+  try {
+    const transcript = conversation
+      .map(m => `${m.role === 'user' ? 'PARTICIPANT' : 'AGENT'}: ${m.text}`)
+      .join('\n\n');
+    const turnId = 'turn_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    typing(true);
+    const res = await fetch(CONFIG.runEndpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        workflow_id: CONFIG.workflow,
+        input: {
+          session_id: sessionId,
+          run_id: turnId,
+          idempotency_key: turnId,
+          message: outcome,
+          transcript,
+        },
+      }),
+    });
+    const data = await res.json();
+    const reply = data?.result?.output_text || data?.output_text || '';
+    if (reply) {
+      conversation.push({ role: 'assistant', text: reply, ts: Date.now() });
+      persist();
+    }
+  } catch (err) {
+    showToast(`Follow-up failed: ${err.message}`);
+  } finally {
+    typing(false);
+    render();
   }
 }
 
