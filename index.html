@@ -317,6 +317,29 @@
     box-shadow: 0 4px 16px rgba(0,0,0,0.2);
   }
 
+  .msg-live {
+    display: block;
+    width: 100%;
+    max-width: 560px;
+    aspect-ratio: 16 / 10;
+    margin: 0.65rem 0 0.25rem;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: #000;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+  }
+
+  .msg-live-link {
+    display: inline-block;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.7rem;
+    color: var(--muted);
+    text-decoration: none;
+    margin: 0 0 0.5rem;
+  }
+
+  .msg-live-link:hover { color: var(--accent); }
+
   .typing {
     display: none;
     align-self: flex-start;
@@ -768,12 +791,24 @@ function videoEmbed(url) {
     + `</video>`;
 }
 
+function liveBrowserEmbed(url) {
+  return `<iframe src="${url}" class="msg-live" sandbox="allow-scripts allow-same-origin allow-popups" loading="lazy"></iframe>`
+    + `<a href="${url}" target="_blank" rel="noopener" class="msg-live-link">↗ open live view in a new tab</a>`;
+}
+
 function formatText(text) {
   // 0. Strip internal tool-call markers so they never render to the participant.
   text = text
     .replace(/<<TINYFISH_RUN\s+[^>]*>>/g, '')
     .replace(/<<MM_SUBMIT\s+[^>]*>>/g, '')
     .trim();
+
+  // 0b. Render live-browser embeds before HTML escaping strips the URL.
+  const liveSlots = [];
+  text = text.replace(/<<VIDEO:(https?:\/\/[^>\s]+)>>/g, (_, url) => {
+    const i = liveSlots.push(liveBrowserEmbed(url)) - 1;
+    return `\u0001LIVE${i}\u0001`;
+  });
 
   // 1. HTML-escape everything so agent-emitted content can't inject markup.
   let s = text
@@ -806,7 +841,8 @@ function formatText(text) {
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/`(.+?)`/g, '<code>$1</code>')
     .replace(/\n/g, '<br>')
-    .replace(/\u0000SLOT(\d+)\u0000/g, (_, i) => slots[Number(i)]);
+    .replace(/\u0000SLOT(\d+)\u0000/g, (_, i) => slots[Number(i)])
+    .replace(/\u0001LIVE(\d+)\u0001/g, (_, i) => liveSlots[Number(i)]);
 
   return s;
 }
@@ -965,35 +1001,87 @@ async function submitToMentorMatesAndContinue(attrs) {
 }
 
 async function runTinyfishAndContinue(url, goal) {
-  // Show a status bubble while the browser agent works
+  // Placeholder bubble that will be mutated as live events stream in.
+  const liveId = 'live-' + Date.now().toString(36);
   conversation.push({
     role: 'assistant',
-    text: `_running Tinyfish on ${url} — this usually takes 30-90 seconds..._`,
+    liveId,
+    text: `_Tinyfish is opening a browser and heading to ${url}…_`,
     ts: Date.now(),
   });
   persist();
   render();
-  typing(true);
 
-  let outcome;
+  let streamingUrl = null;
+  let runId = null;
+  let purpose = null;
+  let result = null;
+  let errorMsg = null;
+
+  function updateLive() {
+    const m = conversation.find(x => x.liveId === liveId);
+    if (!m) return;
+    let t = '';
+    if (streamingUrl) t += `<<VIDEO:${streamingUrl}>>\n`;
+    t += `**Tinyfish live**\n`;
+    t += `- target: ${url}\n`;
+    t += `- goal: ${goal}\n`;
+    if (runId) t += `- run: \`${runId}\`\n`;
+    if (purpose) t += `- step: ${purpose}\n`;
+    if (result) t += `\n_run complete_`;
+    if (errorMsg) t += `\n_error: ${errorMsg}_`;
+    m.text = t;
+    persist();
+    render();
+  }
+
   try {
     const r = await fetch('/api/tinyfish', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
       body: JSON.stringify({ api_key: tinyfishKey, url, goal }),
     });
-    const data = await r.json();
-    if (!r.ok) {
-      outcome = `TINYFISH_ERROR: ${data.error || r.status}${data.detail ? ' — ' + data.detail : ''}`;
+    if (!r.ok || !r.body) {
+      const body = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+      errorMsg = body.error || `HTTP ${r.status}`;
+      updateLive();
     } else {
-      outcome = `TINYFISH_RESULT: ${JSON.stringify(data.result).slice(0, 3000)}`;
-      if (data.streaming_url) outcome += `\n(streaming URL: ${data.streaming_url})`;
+      const reader = r.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        let idx;
+        while ((idx = buf.indexOf('\n\n')) !== -1) {
+          const frame = buf.slice(0, idx).trim();
+          buf = buf.slice(idx + 2);
+          if (!frame.startsWith('data:')) continue;
+          let evt;
+          try { evt = JSON.parse(frame.slice(5).trim()); } catch { continue; }
+          if (evt.runId) runId = evt.runId;
+          if (evt.streamingUrl) streamingUrl = evt.streamingUrl;
+          if (evt.purpose) purpose = evt.purpose;
+          if (evt.type === 'COMPLETE') {
+            const rj = evt.resultJson || {};
+            if (rj.parsed) { try { result = JSON.parse(rj.parsed); } catch { result = rj.parsed; } }
+            else if (rj.input) { try { result = JSON.parse(rj.input); } catch { result = rj.input; } }
+            else if (evt.result) result = evt.result;
+          }
+          if (evt.type === 'ERROR') errorMsg = evt.message || 'Tinyfish reported an error';
+          updateLive();
+        }
+      }
     }
   } catch (err) {
-    outcome = `TINYFISH_ERROR: ${err.message}`;
-  } finally {
-    typing(false);
+    errorMsg = err.message;
+    updateLive();
   }
+
+  const outcome = errorMsg
+    ? `TINYFISH_ERROR: ${errorMsg}`
+    : `TINYFISH_RESULT: ${JSON.stringify(result).slice(0, 3000)}${streamingUrl ? `\n(streaming URL: ${streamingUrl})` : ''}`;
 
   // Feed result back to the agent as a participant-side message so it can summarize
   conversation.push({ role: 'user', text: outcome, ts: Date.now() });
