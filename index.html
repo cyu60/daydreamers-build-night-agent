@@ -1060,11 +1060,11 @@ async function runTinyfishAndContinue(url, goal) {
           if (!frame.startsWith('data:')) continue;
           let evt;
           try { evt = JSON.parse(frame.slice(5).trim()); } catch { continue; }
-          if (evt.runId) runId = evt.runId;
-          if (evt.streamingUrl) streamingUrl = evt.streamingUrl;
+          if (evt.runId || evt.run_id) runId = evt.runId || evt.run_id;
+          if (evt.streamingUrl || evt.streaming_url) streamingUrl = evt.streamingUrl || evt.streaming_url;
           if (evt.purpose) purpose = evt.purpose;
           if (evt.type === 'COMPLETE') {
-            const rj = evt.resultJson || {};
+            const rj = evt.resultJson || evt.result_json || {};
             if (rj.parsed) { try { result = JSON.parse(rj.parsed); } catch { result = rj.parsed; } }
             else if (rj.input) { try { result = JSON.parse(rj.input); } catch { result = rj.input; } }
             else if (evt.result) result = evt.result;
